@@ -1,0 +1,137 @@
+
+
+Directory <- "/Users/traviskochan/Desktop/Assemblies/Clustage/serum"
+
+if (!requireNamespace("dplyr", quietly = TRUE)) {
+  # If not installed, install dplyr
+  install.packages("dplyr")
+}
+
+if (!requireNamespace("olsrr", quietly = TRUE)) {
+  # If not installed, install olsrr
+  install.packages("olsrr")
+}
+
+# Load dplyr
+library(dplyr)
+library(olsrr)
+
+RegressionData <- read.csv(file.path(Directory, "out_subelements.csv"))
+
+# Read the text file into a data frame
+Stats <- read.table(file.path(Directory, "out_subelements.key.txt"), header = TRUE, sep = "\t")
+
+Stats_filtered <- subset(Stats, length >= 100)
+Stats_filtered <- subset(Stats_filtered, num_genomes >= 5)
+Stats_filtered <- subset(Stats_filtered, num_genomes <= 30)
+num_rows_filtered <- nrow(Stats_filtered)
+cat("Number of rows after filtering:", num_rows_filtered, "\n")
+median(Stats_filtered$avg_rank)
+max(Stats_filtered$avg_rank)
+#Stats_filtered <- Stats_filtered[order(Stats_filtered$avg_rank, decreasing = TRUE), ][1:40, ]
+median(Stats_filtered$avg_rank)
+max(Stats_filtered$avg_rank)
+subelement_values <- unique(Stats_filtered$subelement)
+
+# Find the common values between subelement_values and column names in RegressionData
+common_columns <- intersect(subelement_values, names(RegressionData))
+
+columns_to_keep <- c(1, 2, match(common_columns, names(RegressionData)))
+RegressionData_filtered <- RegressionData[, columns_to_keep]
+
+
+
+dependent_variable <- "rank"
+independent_variables <- names(RegressionData_filtered)[3:ncol(RegressionData_filtered)]
+
+model_results <- data.frame(ModelName = character(0), R2Value = numeric(0))
+
+# Loop through each independent variable and fit a linear regression model
+for (variable in independent_variables) {
+  formula_str <- paste(dependent_variable, "~", variable)
+  formula_obj <- as.formula(formula_str)
+
+  linear_model <- lm(formula_obj, data = RegressionData_filtered)
+
+  # Store model name and R-squared value in the data frame
+  model_results <- rbind(model_results, data.frame(ModelName = variable, R2Value = summary(linear_model)$r.squared))
+}
+
+model_results <- model_results %>% arrange(desc(R2Value))
+
+# Print the resulting sorted data frame
+print(model_results)
+
+
+
+# List of all variables (except the dependent variable)
+all_variables <- setdiff(names(RegressionData_filtered), c('rank', 'genome'))
+
+# Data frame to store results
+df99 <- data.frame(Model = character(),
+                   R2 = numeric(),
+                   AdjR2 = numeric(),
+                   stringsAsFactors = FALSE)
+
+# Initial model
+current_variables <- model_results$ModelName[1]
+#current_variables <- c('bin309_se00001')
+initial_model <- lm(rank ~ ., data = RegressionData_filtered[, c('rank', current_variables)])
+
+# Extract model information
+initial_summary <- summary(initial_model)
+initial_r2 <- initial_summary$r.squared
+initial_adjr2 <- initial_summary$adj.r.squared
+
+# Bind results to df99
+df99 <- rbind(df99, data.frame(Model = paste(current_variables, collapse = '_'),
+                               R2 = initial_r2,
+                               AdjR2 = initial_adjr2))
+for (i in 1:12) {
+# Loop to add one variable at a time
+for (new_variable in all_variables) {
+  current_variables2 <- c(current_variables, new_variable)
+
+  # Fit the linear regression model
+  current_model <- lm(rank ~ ., data = RegressionData_filtered[, c('rank', current_variables2)])
+
+  # Extract model information
+  current_summary <- summary(current_model)
+  current_r2 <- current_summary$r.squared
+  current_adjr2 <- current_summary$adj.r.squared
+
+  # Bind results to df99
+  df99 <- rbind(df99, data.frame(Model = paste(current_variables2, collapse = '_'),
+                                 R2 = current_r2,
+                                 AdjR2 = current_adjr2))
+}
+
+# Print the resulting data frame
+print(df99)
+df99 <- df99[order(df99$AdjR2, decreasing = TRUE), ]
+split_values <- unlist(strsplit(df99$Model[1], "_bin"))
+
+# Remove empty elements from the split result
+split_values <- split_values[split_values != ""]
+
+# Adjust the split result to keep both parts in the correct order
+adjusted_values <- c(paste0(split_values[1]), paste0("bin", split_values[-1]))
+
+# Define current_variables as a vector
+current_variables <- as.vector(adjusted_values)
+
+# Print current_variables
+print(current_variables)
+
+}
+# Print the sorted data frame
+print(df99)
+write.csv(df99, file.path(Directory, "df99_output.csv"), row.names = FALSE)
+
+current_variables2 <- c(current_variables)
+
+# Fit the linear regression model
+top_model <- lm(rank ~ ., data = RegressionData_filtered[, c('rank', current_variables2)])
+results <- ols_step_best_subset(top_model)
+results <- results[order(results$adjr, decreasing = TRUE), ]
+write.csv(results, file.path(Directory, "topModel_output.csv"), row.names = FALSE)
